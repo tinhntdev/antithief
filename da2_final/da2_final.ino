@@ -90,7 +90,6 @@ void loop() {
   check_card();
   connect();
   check_btn();
-
   // Blynk vs timer
   Blynk.run();
   timer.run();
@@ -105,49 +104,144 @@ void connect() {
 }
 
 void check_card() {
-  if ( ! mfrc522.PICC_IsNewCardPresent()) 
-  { 
-    return; 
-  }
-  
-  if ( ! mfrc522.PICC_ReadCardSerial()) 
-  {  
-    return;  
-  }
-  
-  Serial.print("UID của thẻ: ");   
-  mfrc522.PICC_DumpToSerial(&(mfrc522.uid));
-  for (byte i = 0; i < mfrc522.uid.size; i++) 
-  { 
-    Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");   
-    // UID[i] = mfrc522.uid.uidByte[i];
-    // Serial.print(UID[i]);
+
+  if (digitalRead(BTN_PIN) == LOW) {
+    digitalWrite(SLN_PIN, HIGH); //unlock
+    lcd.clear();
+    lcd.print(0, 0, " BUTTON UNLOCK ");
+    lcd.print(0, 1, "   DOOR OPEN   ");
+    // digitalWrite(PiezoPin, HIGH), delay(200), digitalWrite(PiezoPin, LOW);
+    delay(2000);
+    DisplayWAiT_CARD();
   }
 
-  Serial.println("   ");
-  
-  // if (UID[i] == ID1[i])
-  // {
-    
-  //     // if ( (dem % 2) == 1) //Số lẻ đèn ON
-  //     // {
-  //       digitalWrite(ELOCK, HIGH);
-  //       Serial.println("ĐÈN ON");    
-  // //     }
-  // //     else
-  // //     {
-  // //       digitalWrite(ELOCK, LOW);
-  // //       Serial.println("ĐÈN OFF");       
-  // //     }
-  // }
-  
-  // else
-  // {
-  //   Serial.println("SAI THẺ........");
-  // }
+  if (beginCard == 0) {
+    if ( ! mfrc522.PICC_IsNewCardPresent()) {  //Look for new cards.
+      Blynk.run();
+      return;
+    }
 
-  mfrc522.PICC_HaltA();  
-  mfrc522.PCD_StopCrypto1();
+    if ( ! mfrc522.PICC_ReadCardSerial()) {  //Select one of the cards.
+      Blynk.run();
+      return;
+    }
+  }
+  
+  //Read "UID".
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    uidDecTemp = mfrc522.uid.uidByte[i];
+    uidDec = uidDec * 256 + uidDecTemp;
+  }
+
+  if (beginCard == 1 || LockSwitch > 0)EEPROMwriteUIDcard();  //uidDec == adminID
+
+  if (LockSwitch == 0) {
+    //CardUIDeEPROMread.
+    for (ARRAYindexUIDcard = 0; ARRAYindexUIDcard <= 9; ARRAYindexUIDcard++) {
+      if (CardUIDeEPROMread[ARRAYindexUIDcard] > 0) {
+        if (CardUIDeEPROMread[ARRAYindexUIDcard] == uidDec) {
+          lcd.clear();
+          lcd.print(0, 0, "CARD ACCESS OPEN");
+          lcd.print(3, 1, uidDec);
+          digitalWrite(SLN_PIN, HIGH); //unlock
+          digitalWrite(PiezoPin, HIGH), delay(200), digitalWrite(PiezoPin, LOW);
+          delay(2000);
+          break;
+        }
+      }
+    }
+
+    if (ARRAYindexUIDcard == 10) {
+      lcd.clear();
+      lcd.print(0, 0, " Card not Found ");
+      lcd.print(0, 1, "                ");
+      lcd.print(0, 1, "ID : ");
+      lcd.print(5, 1, uidDec);
+      for (int i = 0; i <= 2; i++)delay(100), digitalWrite(PiezoPin, HIGH), delay(100), digitalWrite(PiezoPin, LOW);
+      digitalWrite(SLN_PIN, LOW);  //lock();
+      delay(2000);
+    }
+
+    ARRAYindexUIDcard = 0;
+    DisplayWAiT_CARD();
+  }
+}
+
+void EEPROMwriteUIDcard() {
+
+  if (LockSwitch == 0) {
+    lcd.clear();
+    lcd.print(0, 0, " START REC CARD ");
+    lcd.print(0, 1, "PLEASE SCAN CARDS");
+    delay(500);
+  }
+
+  if (LockSwitch > 0) {
+    if (skipCard == 1) {  //uidDec == adminID
+      lcd.clear();
+      lcd.print(0, 0, "   Remove RECORD   ");
+      lcd.print(0, 1, "                ");
+      lcd.print(0, 1, "   label : ");
+      lcd.print(11, 1, EEPROMstartAddr / 5);
+      EEPROMstartAddr += 5;
+      skipCard = 0;
+    } else {
+      Serial.println("writeCard");
+      EEPROM.write(EEPROMstartAddr, uidDec & 0xFF);
+      EEPROM.write(EEPROMstartAddr + 1, (uidDec & 0xFF00) >> 8);
+      EEPROM.write(EEPROMstartAddr + 2, (uidDec & 0xFF0000) >> 16);
+      EEPROM.write(EEPROMstartAddr + 3, (uidDec & 0xFF000000) >> 24);
+      EEPROM.commit();
+      delay(10);
+      lcd.clear();
+      lcd.print(0, 1, "                ");
+      lcd.print(0, 0, "RECORD OK! IN   ");
+      lcd.print(0, 1, "MEMORY : ");
+      lcd.print(9, 1, EEPROMstartAddr / 5);
+      EEPROMstartAddr += 5;
+      delay(500);
+    }
+  }
+
+  LockSwitch++;
+
+  if (EEPROMstartAddr / 5 == 10) {
+    lcd.clear();
+    lcd.print(0, 0, "RECORD FINISH");
+    delay(2000);
+    EEPROMstartAddr = 0;
+    uidDec = 0;
+    ARRAYindexUIDcard = 0;
+    EEPROMreadUIDcard();
+  }
+}
+
+void EEPROMreadUIDcard() {
+  for (int i = 0; i <= 9; i++) {
+    byte val = EEPROM.read(EEPROMstartAddr + 3);
+    CardUIDeEPROMread[ARRAYindexUIDcard] = (CardUIDeEPROMread[ARRAYindexUIDcard] << 8) | val;
+    val = EEPROM.read(EEPROMstartAddr + 2);
+    CardUIDeEPROMread[ARRAYindexUIDcard] = (CardUIDeEPROMread[ARRAYindexUIDcard] << 8) | val;
+    val = EEPROM.read(EEPROMstartAddr + 1);
+    CardUIDeEPROMread[ARRAYindexUIDcard] = (CardUIDeEPROMread[ARRAYindexUIDcard] << 8) | val;
+    val = EEPROM.read(EEPROMstartAddr);
+    CardUIDeEPROMread[ARRAYindexUIDcard] = (CardUIDeEPROMread[ARRAYindexUIDcard] << 8) | val;
+
+    ARRAYindexUIDcard++;
+    EEPROMstartAddr += 5;
+  }
+
+  ARRAYindexUIDcard = 0;
+  EEPROMstartAddr = 0;
+  uidDec = 0;
+  LockSwitch = 0;
+  DisplayWAiT_CARD();
+}
+
+void DisplayWAiT_CARD() {
+  lcd.clear();
+  lcd.print(0, 0, "    SCAN THE   ");
+  lcd.print(0, 1, "      CARD      ");
 }
 
 void check_btn() {
